@@ -1,0 +1,17 @@
+RAG stands for Retrieval Augmented Generation.
+
+It combines a retriever (which fetches relevant documents from a knowledge base)
+with a generator (an LLM that produces the final answer). Instead of relying only
+on what the model memorized during training, RAG grounds answers in external data
+you provide. This reduces hallucination and lets the model use fresh, private,
+or domain-specific knowledge.
+
+A typical RAG pipeline has these stages:
+1. Load   - read raw data from files, web pages, databases, PDFs.
+2. Split  - chop large documents into smaller chunks.
+3. Embed  - turn each chunk into a vector of numbers.
+4. Store  - save vectors in a vector database.
+5. Retrieve - given a query, find the most similar chunks.
+6. Generate - feed retrieved chunks + query to the LLM for the answer.
+
+This notebook covers stages 1 to 3: loaders, transformers, and embeddings.
