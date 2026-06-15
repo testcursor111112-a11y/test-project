@@ -1,13 +1,18 @@
 import os
+from pathlib import Path
 
 import gspread
+from dotenv import load_dotenv
 
-SHEET_ID = os.getenv("SHEET_ID")
-SHEET_KEY = "18tNDOIbVF1215uFw0cokrVWy6ho5apTd4YutWycLjUk"
+# project root .env (this file lives at <root>/leave_manager/)
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+
+SHEET_KEY = os.getenv("SHEET_ID")
+SERVICE_ACCOUNT = os.getenv("SERVICE_ACCOUNT_PATH", "service_account.json")
 
 
 class LeaveSheet:
-    def __init__(self, key=SHEET_KEY, cred="service_account.json"):
+    def __init__(self, key=SHEET_KEY, cred=SERVICE_ACCOUNT):
         gc = gspread.service_account(filename=cred)
         self.ws = gc.open_by_key(key).sheet1
         self.reload()

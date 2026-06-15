@@ -12,3 +12,5 @@ wheels/
 # Secrets
 .env
 service_account.json
+cogs/
+logs/
