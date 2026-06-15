@@ -1,0 +1,8 @@
+langchain
+langchain_community
+langchain_openai
+langchain_groq
+python-dotenv
+langchain-google-genai
+pydantic
+bs4
