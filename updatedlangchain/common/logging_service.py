@@ -24,7 +24,6 @@ from pathlib import Path
 
 # this file lives at <repo-root>/updatedlangchain/common/
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_DEFAULT_LOG = _REPO_ROOT / 'logs' / 'contract_mailer.log'
 
 
 def get_logger(name: str = 'contract_mailer') -> logging.Logger:
@@ -36,7 +35,8 @@ def get_logger(name: str = 'contract_mailer') -> logging.Logger:
     logger.setLevel(logging.INFO)
     logger.propagate = False
 
-    path = Path(os.getenv('APP_LOG_PATH', _DEFAULT_LOG))
+    default_log = _REPO_ROOT / 'logs' / f'{name}.log'
+    path = Path(os.getenv('APP_LOG_PATH', default_log))
     path.parent.mkdir(parents=True, exist_ok=True)
 
     fmt = logging.Formatter(

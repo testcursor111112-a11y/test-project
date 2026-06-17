@@ -57,15 +57,17 @@ except NameError:
 sys.path.append(str(script_dir.parent))
 
 from common.api_key_service import get_rapidapi_service, get_google_service
+from common.logging_service import get_logger
 
+log = get_logger('job_finder')
 rapidapi_service = get_rapidapi_service()
 google_service = get_google_service()
 
 SHEET_ID = os.getenv('SHEET_ID')
 
-print('RapidAPI keys found:', [name for name, _ in rapidapi_service.keys])
-print('Google keys found:', [name for name, _ in google_service.keys])
-print('Sheet ID loaded:', SHEET_ID)
+log.info('RapidAPI keys found: %s', [name for name, _ in rapidapi_service.keys])
+log.info('Google keys found: %s', [name for name, _ in google_service.keys])
+log.info('Sheet ID loaded: %s', SHEET_ID)
 
 
 # ## Roles to search
@@ -136,7 +138,7 @@ def search_jsearch(query: str) -> list[dict]:
             except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
                 if attempt == max_retries - 1:
                     raise
-                print(f"    Transient error: {e}. Retrying in {backoff}s...")
+                log.warning("    Transient error: %s. Retrying in %ds...", e, backoff)
                 time.sleep(backoff)
                 backoff *= 2
             except requests.exceptions.HTTPError as e:
@@ -145,7 +147,7 @@ def search_jsearch(query: str) -> list[dict]:
                 if status_code in (429, 500, 502, 503, 504):
                     if attempt == max_retries - 1:
                         raise
-                    print(f"    HTTP {status_code} error: {e}. Retrying in {backoff}s...")
+                    log.warning("    HTTP %s error: %s. Retrying in %ds...", status_code, e, backoff)
                     time.sleep(backoff)
                     backoff *= 2
                 else:
@@ -175,7 +177,7 @@ worksheet = gc.open_by_key(SHEET_ID).sheet1
 if worksheet.row_values(1) != SHEET_HEADER:
     worksheet.update(values=[SHEET_HEADER], range_name='A1')
 
-print('Connected to sheet:', worksheet.spreadsheet.title)
+log.info('Connected to sheet: %s', worksheet.spreadsheet.title)
 
 
 # In[38]:
@@ -207,10 +209,10 @@ def fetch_all_jobs() -> list[dict]:
     for role in ROLES:
         try:
             jobs = search_jsearch(role)
-            print(f'  {role!r}: {len(jobs)} jobs')
+            log.info('  %r: %d jobs', role, len(jobs))
             raw.extend(jobs)
         except Exception as e:
-            print(f'  {role!r}: request failed -> {e}')
+            log.exception('  %r: request failed', role)
     return raw
 
 
@@ -241,7 +243,7 @@ def dedupe(raw_jobs: list[dict]) -> list[dict]:
         seen.add(key)
         new_jobs.append(job)
 
-    print(f'  {len(raw_jobs)} raw -> {len(new_jobs)} new (not in sheet, {blocked} blocked)')
+    log.info('  %d raw -> %d new (not in sheet, %d blocked)', len(raw_jobs), len(new_jobs), blocked)
     return new_jobs
 
 
@@ -290,7 +292,7 @@ def filter_relevant(jobs: list[dict]) -> list[dict]:
     )
     result = gemini_filter(prompt)
     relevant = [jobs[i] for i in result.indices if 0 <= i < len(jobs)]
-    print(f'  {len(jobs)} new -> {len(relevant)} relevant')
+    log.info('  %d new -> %d relevant', len(jobs), len(relevant))
     return relevant
 
 
@@ -337,7 +339,7 @@ def add_to_sheet(jobs: list[dict]) -> int:
 
     if rows:
         worksheet.append_rows(rows, value_input_option='USER_ENTERED')
-    print(f'  {len(rows)} rows appended to sheet')
+    log.info('  %d rows appended to sheet', len(rows))
     return len(rows)
 
 
@@ -401,10 +403,10 @@ def build_openings_csv(jobs: list[dict]) -> bytes:
 def notify_bde(jobs: list[dict]) -> None:
     """Email the BDE a summary + today's openings as a CSV attachment."""
     if not jobs:
-        print('  no new jobs -> skipping BDE email')
+        log.info('  no new jobs -> skipping BDE email')
         return
     if not (ZOHO_SENDER_EMAIL and ZOHO_APP_PASSWORD and BDE_EMAIL):
-        print('  ZOHO_SENDER_EMAIL / ZOHO_APP_PASSWORD / BDE_EMAIL missing -> skipping email')
+        log.warning('  ZOHO_SENDER_EMAIL / ZOHO_APP_PASSWORD / BDE_EMAIL missing -> skipping email')
         return
 
     n = len(jobs)
@@ -436,7 +438,7 @@ def notify_bde(jobs: list[dict]) -> None:
         smtp.starttls()
         smtp.login(ZOHO_SENDER_EMAIL, ZOHO_APP_PASSWORD)
         smtp.send_message(msg)
-    print(f'  emailed BDE ({BDE_EMAIL}) — {n} job(s), CSV attached')
+    log.info('  emailed BDE (%s) — %d job(s), CSV attached', BDE_EMAIL, n)
 
 
 # ## Run
@@ -447,23 +449,24 @@ def notify_bde(jobs: list[dict]) -> None:
 # In[44]:
 
 
-print('Fetching...')
+log.info('=== job_finder start ===')
+log.info('Fetching...')
 raw = fetch_all_jobs()
 
-print('Deduping...')
+log.info('Deduping...')
 new = dedupe(raw)
 
-print('Filtering...')
+log.info('Filtering...')
 relevant = filter_relevant(new)
 
-print('Writing...')
+log.info('Writing...')
 added = add_to_sheet(relevant)
 
-print('Emailing BDE...')
+log.info('Emailing BDE...')
 notify_bde(relevant)
 
-print('\nDone. Jobs added to sheet:', added)
-print(f'https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit')
+log.info('Done. Jobs added to sheet: %d', added)
+log.info('https://docs.google.com/spreadsheets/d/%s/edit', SHEET_ID)
 
 
 # ## Daily automation (optional)
