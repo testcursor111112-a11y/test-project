@@ -42,19 +42,21 @@
 #    SHEET_ID=your_sheet_id_here
 #    ```
 
-# In[34]:
+# In[ ]:
 
 
 import os
 import sys
 from pathlib import Path
 
-# make ../ (updatedlangchain/) importable for the shared `common` package
+# make ../ (updatedlangchain/) importable for the shared `common` package,
+# and this dir importable for the sibling `linkedin_scrapper` module.
 try:
     script_dir = Path(__file__).resolve().parent
 except NameError:
     script_dir = Path.cwd()
 sys.path.append(str(script_dir.parent))
+sys.path.append(str(script_dir))
 
 from common.api_key_service import get_rapidapi_service, get_google_service
 from common.logging_service import get_logger
@@ -156,6 +158,57 @@ def search_jsearch(query: str) -> list[dict]:
     return rapidapi_service.call(do_request)
 
 
+# ## LinkedIn helper
+# 
+# Scrapes LinkedIn directly via the `linkedin_scrapper` library (no API key, no quota).
+# Each job is normalized to the **same dict shape as JSearch**, so the downstream
+# pipeline (dedupe → Gemini → sheet → email) is source-agnostic.
+# `dateSincePosted='24hr'` = posted within the last 24 hours.
+
+# In[ ]:
+
+
+from linkedin_scrapper import query as linkedin_query
+
+# LinkedIn locations to scrape per role (remote filter on, last 24h).
+LINKEDIN_LOCATIONS = ['India']
+LINKEDIN_LIMIT = 25  # max jobs per (role, location)
+
+
+def _normalize_linkedin(j: dict) -> dict:
+    """Map a linkedin_scrapper job onto the JSearch-shaped dict the rest of
+    the pipeline (dedupe / Gemini / sheet / email) expects."""
+    return {
+        'job_title': j.get('position', ''),
+        'employer_name': j.get('company', ''),
+        'job_apply_link': j.get('jobUrl', ''),
+        'job_city': j.get('location', ''),
+        'job_state': '',
+        'job_country': '',
+        'job_is_remote': True,                      # remoteFilter='remote'
+        'job_publisher': 'LinkedIn',
+        'job_posted_at_datetime_utc': j.get('date', ''),
+        'job_employment_type': '',
+        'job_description': '',                       # scraper has no description
+    }
+
+
+def search_linkedin(role: str) -> list[dict]:
+    """Remote jobs posted in last 24h for one role, across LINKEDIN_LOCATIONS."""
+    out = []
+    for loc in LINKEDIN_LOCATIONS:
+        jobs = linkedin_query({
+            'keyword': role,
+            'location': loc,
+            'dateSincePosted': '24hr',   # last 24 hours
+            'remoteFilter': 'remote',    # remote only
+            'limit': LINKEDIN_LIMIT,
+            'sortBy': 'recent',
+        })
+        out.extend(_normalize_linkedin(j) for j in jobs)
+    return out
+
+
 # ## Google Sheets helper
 
 # In[37]:
@@ -200,19 +253,32 @@ print(os.getcwd())
 # - **filter_relevant** — one Gemini call keeps only jobs genuinely fitting a MERN / full-stack profile
 # - **add_to_sheet** — appends the survivors to Google Sheets (with contact email when found)
 
-# In[39]:
+# In[ ]:
 
 
 def fetch_all_jobs() -> list[dict]:
-    """One JSearch call per role."""
+    """Per role: one JSearch call + one LinkedIn scrape. Combine all results.
+
+    Both sources return the same JSearch-shaped dict, so downstream
+    dedupe/filter/sheet/email handle them identically. dedupe() drops any
+    cross-source duplicates (same apply link or title+company)."""
     raw = []
     for role in ROLES:
+        # --- JSearch (RapidAPI) ---
         try:
             jobs = search_jsearch(role)
-            log.info('  %r: %d jobs', role, len(jobs))
+            log.info('  [jsearch]  %r: %d jobs', role, len(jobs))
             raw.extend(jobs)
-        except Exception as e:
-            log.exception('  %r: request failed', role)
+        except Exception:
+            log.exception('  [jsearch]  %r: request failed', role)
+
+        # --- LinkedIn (scraper library) ---
+        try:
+            ljobs = search_linkedin(role)
+            log.info('  [linkedin] %r: %d jobs', role, len(ljobs))
+            raw.extend(ljobs)
+        except Exception:
+            log.exception('  [linkedin] %r: scrape failed', role)
     return raw
 
 
